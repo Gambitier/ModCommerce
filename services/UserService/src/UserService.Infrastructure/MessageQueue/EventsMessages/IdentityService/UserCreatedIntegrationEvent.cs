@@ -2,18 +2,18 @@ using System.Text.Json.Serialization;
 using MassTransit;
 using UserService.Infrastructure.MessageQueue.Constants.IdentityService;
 
-namespace IdentityService.Contracts.Events.Users;
+namespace UserService.Infrastructure.MessageQueue.Events;
 
 /// <summary>
-/// Event published when a new user is created in the Identity service.
+/// Integration event representing a user created in the Identity service.
 /// </summary>
 /// <param name="UserId">The unique identifier of the created user.</param>
 /// <param name="Email">The email address of the created user.</param>
 /// <param name="Username">The username of the created user.</param>
 /// <param name="CreatedAt">The UTC timestamp when the user was created.</param>
 [EntityName(EventConstants.UserCreatedEvent.Exchange)]
-// [MessageUrn(EventConstants.UserCreatedEvent.Urn)]
-public record UserCreatedEvent(
+[MessageUrn(EventConstants.UserCreatedEvent.Urn)]
+public record UserCreatedIntegrationEvent(
     /// <summary>
     /// The unique identifier of the created user.
     /// </summary>
