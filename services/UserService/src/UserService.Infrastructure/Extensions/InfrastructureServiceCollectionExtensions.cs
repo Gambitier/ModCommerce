@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.ComponentModel.DataAnnotations;
@@ -7,6 +8,13 @@ using UserService.Infrastructure.Authentication.Options;
 using Microsoft.Extensions.Configuration;
 using UserService.Infrastructure.Authentication.Services;
 using System.IdentityModel.Tokens.Jwt;
+using MassTransit;
+using UserService.Infrastructure.Communication.Options;
+using System.Reflection;
+using UserService.Infrastructure.Persistence;
+using UserService.Infrastructure.Persistence.Options;
+using UserService.Infrastructure.MessageQueue.Constants.IdentityService;
+using UserService.Infrastructure.MessageQueue.Consumers.IdentityService;
 using Microsoft.Extensions.Logging;
 
 namespace UserService.Infrastructure.Extensions;
@@ -24,6 +32,8 @@ public class InfrastructureOptions
     /// </summary>
     [Required(ErrorMessage = "Infrastructure configuration sections are required")]
     public InfrastructureConfigurationSections InfraConfigSections { get; set; } = null!;
+
+    public ServiceLifetime RepositoryLifetime { get; set; } = ServiceLifetime.Scoped;
 }
 
 /// <summary>
@@ -31,6 +41,8 @@ public class InfrastructureOptions
 /// </summary>
 public static class InfrastructureServiceCollectionExtensions
 {
+    private const string InfraRepositoriesNamespace = "UserService.Infrastructure.Persistence.Repositories";
+    private const string InfraRepositoryInterfacesNamespace = "UserService.Domain.Interfaces.Repositories";
 
     /// <summary>
     /// Registers the infrastructure services.
@@ -51,10 +63,12 @@ public static class InfrastructureServiceCollectionExtensions
         Validator.ValidateObject(options, new ValidationContext(options), validateAllProperties: true);
 
         services.HttpClients();
-        services.Services();
+        services.AddDbContext();
+        services.AddServices();
+        services.AddRepositories(options.RepositoryLifetime);
 
         services.AddJwtAuthentication();
-
+        services.AddMessageQueue();
         return services;
     }
 
@@ -69,16 +83,93 @@ public static class InfrastructureServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>   
+    /// Registers the DbContext for the IdentityService.
+    /// </summary>
+    /// <param name="services">The service collection to add the DbContext to.</param>
+    /// <param name="databaseOptions">The database options.</param>
+    /// <returns>The service collection with the DbContext added.</returns>
+    private static IServiceCollection AddDbContext(this IServiceCollection services)
+    {
+        services.AddDbContext<UserServiceDbContext>((sp, options) =>
+        {
+            var dbOptions = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+            options.UseNpgsql(dbOptions.ConnectionString);
+        });
+
+        return services;
+    }
+
     /// <summary>
     /// Adds the infrastructure services to the service collection.
     /// </summary>
     /// <param name="services">The service collection to add the services to.</param>
     /// <returns>The service collection with the services added.</returns>
-    public static IServiceCollection Services(this IServiceCollection services)
+    public static IServiceCollection AddServices(this IServiceCollection services)
     {
         services.AddSingleton<IJwksManager, JwksManager>();
         return services;
     }
+
+    /// <summary>
+    /// Adds the repositories to the service collection.
+    /// </summary>
+    /// <param name="services">The service collection to add the repositories to.</param>
+    /// <returns>The service collection with the repositories added.</returns>
+    public static IServiceCollection AddRepositories(this IServiceCollection services, ServiceLifetime lifetime)
+    {
+        var infrastructureAssembly = Assembly.Load("UserService.Infrastructure")
+            ?? throw new InvalidOperationException("Could not find Infrastructure assembly");
+
+        var domainAssembly = Assembly.Load("UserService.Domain")
+            ?? throw new InvalidOperationException("Could not find Domain assembly");
+
+        var repositoryInterfaces = domainAssembly.GetTypes()
+            .Where(t => t.IsInterface && t.Namespace?.StartsWith(InfraRepositoryInterfacesNamespace) == true)
+            .ToList();
+
+        foreach (var interfaceType in repositoryInterfaces)
+        {
+            var implementation = infrastructureAssembly.GetTypes()
+                .FirstOrDefault(t => t.IsClass
+                    && !t.IsAbstract
+                    && t.Namespace?.StartsWith(InfraRepositoriesNamespace) == true
+                    && interfaceType.IsAssignableFrom(t))
+                ?? throw new InvalidOperationException($"No implementation found for {interfaceType.Name} in namespace {InfraRepositoriesNamespace}");
+
+            services.Add(new ServiceDescriptor(interfaceType, implementation, lifetime));
+        }
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the event consumers to the service collection.
+    /// </summary>
+    /// <param name="services">The service collection to add the event consumers to.</param>
+    /// <returns>The service collection with the event consumers added.</returns>
+    // public static IServiceCollection AddEventConsumers(this IServiceCollection services)
+    // {
+    //     // services.AddHostedService<UserProfileCreatedConsumer>();
+    //     // add all consumers here from UserService.Infrastructure.Consumers namespace
+    //     var consumerTypes = Assembly.Load("UserService.Infrastructure.Consumers")
+    //         .GetTypes()
+    //         .Where(t => t.IsClass && !t.IsAbstract && t.Namespace?.StartsWith("UserService.Infrastructure.Consumers") == true)
+    //         .ToList();
+
+    //     foreach (var consumerType in consumerTypes)
+    //     {
+    //         services.AddHostedService(sp =>
+    //         {
+    //             return new BackgroundService(sp =>
+    //             {
+    //                 var consumer = sp.GetRequiredService(consumerType) as IConsumer;
+    //                 return consumer.Consume(context);
+    //             });
+    //         });
+    //     }
+    //     return services;
+    // }
 
     /// <summary>
     /// Adds the JWT authentication to the service collection.
@@ -92,6 +183,51 @@ public static class InfrastructureServiceCollectionExtensions
             .AddJwtBearer();
 
         services.ConfigureOptions<ConfigureJwtBearerOptions>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the MassTransit to the service collection.
+    /// </summary>
+    /// <param name="services">The service collection to add the MassTransit to.</param>
+    /// <returns>The service collection with the MassTransit added.</returns>
+    public static IServiceCollection AddMessageQueue(this IServiceCollection services)
+    {
+        services.AddMassTransit(busConfig =>
+        {
+            busConfig.SetKebabCaseEndpointNameFormatter();
+            // busConfig.AddConsumers(Assembly.GetExecutingAssembly());
+            busConfig.AddConsumer<UserCreatedEventConsumer>();
+
+            busConfig.UsingRabbitMq((context, cfg) =>
+            {
+                var options = context.GetRequiredService<IOptions<RabbitMQOptions>>().Value;
+                var logger = context.GetRequiredService<ILogger<UserCreatedEventConsumer>>();
+
+                cfg.Host(options.Host, options.VirtualHost, h =>
+                {
+                    h.Username(options.Username);
+                    h.Password(options.Password);
+                });
+
+                // Configure the consumer endpoint
+                cfg.ReceiveEndpoint(EventConstants.UserCreatedEvent.Queue, e =>
+                {
+                    var exchangeName = EventConstants.UserCreatedEvent.Exchange;
+                    logger.LogInformation("Binding queue {QueueName} to exchange {ExchangeName}",
+                        EventConstants.UserCreatedEvent.Queue,
+                        exchangeName);
+
+                    e.UseMessageRetry(r => r.Intervals(100, 200, 500, 1000, 2000));
+                    // Bind the queue to the exchange
+                    e.Bind(exchangeName);
+                    e.ConfigureConsumer<UserCreatedEventConsumer>(context);
+                });
+
+                cfg.ConfigureEndpoints(context);
+            });
+        });
 
         return services;
     }

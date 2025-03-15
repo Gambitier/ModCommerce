@@ -2,17 +2,21 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using IdentityService.Domain.Events;
 using IdentityService.Application.Interfaces.Services;
+using MassTransit;
+using IdentityService.Contracts.Events.Users;
 
 public class UserCreatedDomainEventHandler : INotificationHandler<UserCreatedDomainEvent>
 {
     private readonly IAuthenticationService _authenticationService;
     private readonly ILogger<UserCreatedDomainEventHandler> _logger;
-
+    private readonly IPublishEndpoint _publishEndpoint;
     public UserCreatedDomainEventHandler(
         IAuthenticationService authenticationService,
+        IPublishEndpoint publishEndpoint,
         ILogger<UserCreatedDomainEventHandler> logger)
     {
         _authenticationService = authenticationService;
+        _publishEndpoint = publishEndpoint;
         _logger = logger;
     }
 
@@ -34,6 +38,20 @@ public class UserCreatedDomainEventHandler : INotificationHandler<UserCreatedDom
 
             _logger.LogInformation(
                 "Successfully sent confirmation email to {Email}",
+                notification.Email);
+
+            await _publishEndpoint.Publish(
+                new UserCreatedEvent(
+                    notification.UserId,
+                    notification.Email,
+                    notification.Username,
+                    notification.CreatedAt
+                ),
+                cancellationToken
+            );
+
+            _logger.LogInformation(
+                "Successfully published user created event for user email: {Email}",
                 notification.Email);
         }
         catch (Exception ex)

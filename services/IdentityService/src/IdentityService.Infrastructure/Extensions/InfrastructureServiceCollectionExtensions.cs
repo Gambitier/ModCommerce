@@ -16,7 +16,9 @@ using Microsoft.Extensions.Configuration;
 using IdentityService.Infrastructure.Authentication.Interfaces;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-
+using MassTransit;
+using IdentityService.Infrastructure.Communication.Options;
+using IdentityService.Contracts.Constants;
 
 namespace IdentityService.Infrastructure.Extensions;
 
@@ -71,6 +73,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddJwtAuthentication(configuration.GetOptions<JwtOptions>(options.InfraConfigSections.JwtSection));
         services.AddAuthorizationServices();
         services.AddEmailService();
+        services.AddMessageQueue();
 
         return services;
     }
@@ -292,6 +295,29 @@ public static class InfrastructureServiceCollectionExtensions
     private static IServiceCollection AddEmailService(this IServiceCollection services)
     {
         services.AddTransient<IEmailService, EmailService>();
+        return services;
+    }
+
+    private static IServiceCollection AddMessageQueue(this IServiceCollection services)
+    {
+        services.AddMassTransit(busConfig =>
+        {
+            busConfig.SetKebabCaseEndpointNameFormatter();
+            busConfig.AddConsumers(Assembly.GetExecutingAssembly());
+
+            busConfig.UsingRabbitMq((context, cfg) =>
+            {
+                var options = context.GetRequiredService<IOptions<RabbitMQOptions>>().Value;
+                cfg.Host(options.Host, options.VirtualHost, h =>
+                {
+                    h.Username(options.Username);
+                    h.Password(options.Password);
+                });
+
+                cfg.ConfigureEndpoints(context);
+            });
+        });
+
         return services;
     }
 }
