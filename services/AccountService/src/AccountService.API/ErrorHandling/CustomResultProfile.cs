@@ -1,13 +1,13 @@
 using FluentResults;
 using FluentResults.Extensions.AspNetCore;
-using IdentityService.Domain.Errors;
+using AccountService.Domain.Errors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 
-namespace IdentityService.API.ErrorHandling;
+namespace AccountService.API.ErrorHandling;
 
 /// <summary>
-/// Custom result profile for the IdentityService.API that transforms FluentResults errors into standard HTTP responses.
+/// Custom result profile for the AccountService.API that transforms FluentResults errors into standard HTTP responses.
 /// Without this profile, the API would not properly translate FluentResults errors into RFC 7807 problem details format
 /// that clients expect from REST APIs.
 /// </summary>

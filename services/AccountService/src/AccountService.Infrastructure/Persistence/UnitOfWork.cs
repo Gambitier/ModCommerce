@@ -1,18 +1,18 @@
 using FluentResults;
-using IdentityService.Domain.Interfaces.Persistence;
+using AccountService.Domain.Interfaces.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using IdentityService.Domain.Interfaces.Events;
+using AccountService.Domain.Interfaces.Events;
 
-namespace IdentityService.Infrastructure.Persistence;
+namespace AccountService.Infrastructure.Persistence;
 
 public class UnitOfWork : IUnitOfWork
 {
-    private readonly IdentityDbContext _context;
+    private readonly UserServiceDbContext _context;
     private readonly IDomainEventPublisher _domainEventPublisher;
     private IDbContextTransaction? _currentTransaction;
 
-    public UnitOfWork(IdentityDbContext context, IDomainEventPublisher domainEventPublisher)
+    public UnitOfWork(UserServiceDbContext context, IDomainEventPublisher domainEventPublisher)
     {
         _context = context;
         _domainEventPublisher = domainEventPublisher;

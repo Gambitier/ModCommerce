@@ -1,4 +1,4 @@
-namespace IdentityService.Domain.Interfaces.Events;
+namespace AccountService.Domain.Interfaces.Events;
 
 /// <summary>
 /// Publishes domain events.

@@ -1,7 +1,7 @@
-using IdentityService.Domain.Interfaces.Events;
+using AccountService.Domain.Interfaces.Events;
 using MediatR;
 
-namespace IdentityService.Infrastructure.Events;
+namespace AccountService.Infrastructure.Events;
 
 /// <summary>
 /// Publishes domain events.
